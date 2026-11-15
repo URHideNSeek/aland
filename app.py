@@ -104,7 +104,10 @@ else:
     st.caption("Uses Google Maps Static API satellite imagery. Requires a Google Maps Platform API key with Maps Static API enabled and billing configured.")
     address=st.text_input("Street address or place",placeholder="e.g. Ohio State University, Columbus, OH")
     zoom=st.slider("Satellite map zoom",15,21,19)
-    key=st.secrets.get("GOOGLE_MAPS_API_KEY","")
+    try:
+        key=st.secrets.get("GOOGLE_MAPS_API_KEY","")
+    except Exception:
+        key=""
     if not key:
         st.warning("Set GOOGLE_MAPS_API_KEY in Streamlit Cloud → App settings → Secrets. Do not paste keys into public source code.")
     if st.button("Fetch satellite image",disabled=not bool(address.strip()) or not bool(key)):
