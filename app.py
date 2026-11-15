@@ -5,7 +5,6 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 import cv2
-import requests
 
 st.set_page_config(page_title="ALand | Landing-Site Baselines", layout="wide")
 st.title("ALand — Landing-Site Baseline Explorer")
@@ -86,62 +85,29 @@ def compare(result):
                 hit["items"].append(item);hit["methods"].add(name)
     return groups
 
-source=st.radio("Image source",["Upload images","Google satellite by address"],horizontal=True)
-frames=[]
-names=[]
-if source=="Upload images":
-    uploads=st.file_uploader("Upload aerial images (order: highest altitude to lowest)",type=["png","jpg","jpeg"],accept_multiple_files=True)
-    if uploads:
-        for f in uploads:
-            try:
-                im=Image.open(io.BytesIO(f.getvalue())).convert("RGB")
-                im.thumbnail((1100,1100))
-                frames.append(im)
-                names.append(f.name)
-            except Exception as exc:
-                st.warning(f"Unable to read {f.name}: {exc}")
-else:
-    st.caption("Uses Google Maps Static API satellite imagery. Requires a Google Maps Platform API key with Maps Static API enabled and billing configured.")
-    address=st.text_input("Street address or place",placeholder="e.g. Ohio State University, Columbus, OH")
-    zoom=st.slider("Satellite map zoom",15,21,19)
-    try:
-        key=st.secrets.get("GOOGLE_MAPS_API_KEY","")
-    except Exception:
-        key=""
-    if not key:
-        st.warning("Set GOOGLE_MAPS_API_KEY in Streamlit Cloud → App settings → Secrets. Do not paste keys into public source code.")
-    if st.button("Fetch satellite image",disabled=not bool(address.strip()) or not bool(key)):
-        try:
-            response=requests.get(
-                "https://maps.googleapis.com/maps/api/staticmap",
-                params={"center":address.strip(),"zoom":zoom,"size":"640x640","scale":2,"maptype":"satellite","key":key},
-                timeout=20,
-            )
-            response.raise_for_status()
-            if not response.headers.get("content-type","").startswith("image/"):
-                raise ValueError("Google returned a non-image response. Check the API key, billing, and API restrictions.")
-            im=Image.open(io.BytesIO(response.content)).convert("RGB")
-            st.session_state["satellite_image"]=im
-            st.session_state["satellite_label"]=f"{address.strip()} (zoom {zoom})"
-        except Exception as exc:
-            st.error(f"Satellite image request failed: {exc}")
-    if "satellite_image" in st.session_state:
-        frames=[st.session_state["satellite_image"]]
-        names=[st.session_state.get("satellite_label","Google satellite")]
-        st.info("Satellite map zoom is not aircraft altitude. Single map imagery cannot validate B2/B3 multi-altitude memory.")
-if not frames:
-    st.info("Upload images or fetch a satellite image to begin.")
+uploads=st.file_uploader("Upload aerial images (order: highest altitude to lowest)",type=["png","jpg","jpeg"],accept_multiple_files=True)
+if not uploads:
+    st.info("Upload one or more images to begin. Multi-altitude images must be spatially registered for meaningful B2/B3 comparisons.")
     st.stop()
-idx=st.select_slider("Observation",options=list(range(len(frames))),format_func=lambda i:f"{i+1}: {names[i]}")
-alt=st.number_input("Altitude of selected observation (ft AGL; metadata only)",min_value=0,max_value=10000,value=250,step=25) if source=="Upload images" else 0
+frames=[]
+for f in uploads:
+    try:
+        im=Image.open(io.BytesIO(f.getvalue())).convert("RGB")
+        im.thumbnail((1100,1100))
+        frames.append(im)
+    except Exception as exc:
+        st.warning(f"Unable to read {f.name}: {exc}")
+if not frames:st.stop()
+idx=st.select_slider("Observation",options=list(range(len(frames))),format_func=lambda i:f"{i+1}: {uploads[i].name}")
+alt=st.number_input("Altitude of selected observation (ft AGL; metadata only)",min_value=0,max_value=10000,value=250,step=25)
 tile=st.slider("Candidate window size (pixels)",32,180,72,8)
 cutoff=st.slider("Appearance score threshold (not a safety probability)",0.10,0.95,0.55,0.05)
 method=st.radio("Select analysis",["B1","B2","B3","Compare"],horizontal=True)
-st.image(frames[idx],caption=f"Original observation {idx+1} | {names[idx]}" + (f" | reported altitude {alt} ft" if source=="Upload images" else " | satellite map image"),use_container_width=True)
+st.image(frames[idx],caption=f"Original observation {idx+1} | reported altitude {alt} ft",use_container_width=True)
 if st.button("▶ Play analysis",type="primary"):
     results=run_baselines(frames[idx],frames[:idx],tile,cutoff)
     st.session_state["results"]=results
-    st.session_state["signature"]=(idx,tile,cutoff,tuple(hashlib.sha256(im.tobytes()).hexdigest() for im in frames))
+    st.session_state["signature"]=(idx,tile,cutoff,tuple(hashlib.sha256(f.getvalue()).hexdigest() for f in uploads))
 sig=(idx,tile,cutoff,tuple(hashlib.sha256(f.getvalue()).hexdigest() for f in uploads))
 if st.session_state.get("signature")!=sig:
     st.info("Press Play analysis to compute results for this image and these settings.")
